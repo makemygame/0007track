@@ -1,5 +1,3 @@
-from flask import Flask
-import threading
 import os
 import requests
 from web3 import Web3
@@ -13,23 +11,16 @@ load_dotenv()
 
 ETHERSCAN_API_KEY = os.getenv('ETHERSCAN_API_KEY')
 TELEGRAM_API_KEY = os.getenv('TELEGRAM_API_KEY')
-CHAT_ID = os.getenv('CHAT_ID')  # ID nhóm hoặc người dùng Telegram
+CHAT_ID = os.getenv('CHAT_ID')  # ID của nhóm hoặc người nhận thông báo
 
 wallet_address = '0x835678a611b28684005a5e2233695fb6cbbb0007'
 usdt_contract = '0xdAC17F958D2ee523a2206206994597C13D831ec7'
 api_url = f'https://api.etherscan.io/api?module=account&action=tokentx&address={wallet_address}&contractaddress={usdt_contract}&startblock=0&endblock=99999999&sort=asc&apikey={ETHERSCAN_API_KEY}'
 
 start_date = datetime(2024, 12, 5, tzinfo=timezone.utc)
+
+# Biến toàn cục lưu hash giao dịch đã thông báo cuối cùng
 last_transaction_hash = None
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Transaction Tracker is running!"
-
-def start_tracker():
-    asyncio.run(track_transactions())
 
 async def get_usdt_transactions():
     try:
@@ -57,7 +48,7 @@ async def send_telegram_message(bot, messages):
         while True:
             try:
                 await bot.send_message(chat_id=CHAT_ID, text=message)
-                await asyncio.sleep(1)
+                await asyncio.sleep(1)  # Tránh spam quá nhanh
                 break
             except Exception as e:
                 if "Flood control exceeded" in str(e):
@@ -78,11 +69,15 @@ async def track_transactions():
         new_transactions = []
 
         for tx in usdt_transactions:
+            # Chỉ thêm giao dịch mới hơn giao dịch cuối cùng đã thông báo
             if last_transaction_hash is None or tx['hash'] > last_transaction_hash:
                 new_transactions.append(tx)
 
+        # Sắp xếp các giao dịch theo thời gian
+        new_transactions = sorted(new_transactions, key=lambda x: int(x['timeStamp']))
+
         messages = []
-        for tx in sorted(new_transactions, key=lambda x: int(x['timeStamp'])):
+        for tx in new_transactions:
             timestamp = int(tx['timeStamp'])
             date_time = datetime.fromtimestamp(timestamp, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -100,12 +95,11 @@ async def track_transactions():
         if messages:
             await send_telegram_message(bot, messages)
 
+        # Cập nhật giao dịch cuối cùng đã thông báo
         if new_transactions:
             last_transaction_hash = new_transactions[-1]['hash']
 
         await asyncio.sleep(300)
 
 if __name__ == '__main__':
-    tracker_thread = threading.Thread(target=start_tracker, daemon=True)
-    tracker_thread.start()
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+    asyncio.run(track_transactions())
