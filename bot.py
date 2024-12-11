@@ -5,6 +5,10 @@ from telegram import Bot
 from datetime import datetime, timezone
 import asyncio
 from dotenv import load_dotenv
+from flask import Flask
+
+# Flask app để mở cổng
+app = Flask(__name__)
 
 # Load biến môi trường từ file .env
 load_dotenv()
@@ -19,8 +23,11 @@ api_url = f'https://api.etherscan.io/api?module=account&action=tokentx&address={
 
 start_date = datetime(2024, 12, 5, tzinfo=timezone.utc)
 
-# Biến toàn cục lưu hash giao dịch đã thông báo cuối cùng
 last_transaction_hash = None
+
+@app.route("/")
+def home():
+    return "Transaction tracker is running!"
 
 async def get_usdt_transactions():
     try:
@@ -48,7 +55,7 @@ async def send_telegram_message(bot, messages):
         while True:
             try:
                 await bot.send_message(chat_id=CHAT_ID, text=message)
-                await asyncio.sleep(1)  # Tránh spam quá nhanh
+                await asyncio.sleep(1)
                 break
             except Exception as e:
                 if "Flood control exceeded" in str(e):
@@ -69,11 +76,9 @@ async def track_transactions():
         new_transactions = []
 
         for tx in usdt_transactions:
-            # Chỉ thêm giao dịch mới hơn giao dịch cuối cùng đã thông báo
             if last_transaction_hash is None or tx['hash'] > last_transaction_hash:
                 new_transactions.append(tx)
 
-        # Sắp xếp các giao dịch theo thời gian
         new_transactions = sorted(new_transactions, key=lambda x: int(x['timeStamp']))
 
         messages = []
@@ -95,11 +100,16 @@ async def track_transactions():
         if messages:
             await send_telegram_message(bot, messages)
 
-        # Cập nhật giao dịch cuối cùng đã thông báo
         if new_transactions:
             last_transaction_hash = new_transactions[-1]['hash']
 
         await asyncio.sleep(300)
 
 if __name__ == '__main__':
-    asyncio.run(track_transactions())
+    # Chạy tracker trong một thread riêng
+    loop = asyncio.get_event_loop()
+    loop.create_task(track_transactions())
+    
+    # Chạy Flask để mở cổng
+    port = int(os.getenv("PORT", 5000))  # Render tự động đặt PORT
+    app.run(host='0.0.0.0', port=port)
